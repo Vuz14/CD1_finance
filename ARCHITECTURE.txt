@@ -1,0 +1,328 @@
+🎯 ML MODEL TRAINER - FULL STACK PROJECT
+==========================================
+
+📂 PROJECT ROOT: e:\ki5\CĐ\FE
+├── 📄 README.md                    ← Tài liệu chính
+├── 📄 QUICKSTART.md                ← Hướng dẫn nhanh (BẢN ĐẶC)
+├── 📄 SETUP.md                     ← Chi tiết cài đặt
+├── 📄 DEVELOPMENT.md               ← Hướng dẫn development
+├── 📄 PROJECT_OVERVIEW.md          ← Tổng quan project
+├── 📄 NEXT_STEPS.md                ← Bước tiếp theo
+├── 📄 ARCHITECTURE.txt             ← File này
+│
+├── 🔧 SCRIPTS CHẠY NHANH
+├── 📄 start.bat                    ← Chạy cả 2 servers (Windows)
+├── 📄 start.sh                     ← Chạy cả 2 servers (Mac/Linux)
+├── 📄 verify_setup.py              ← Kiểm tra setup
+│
+├── ⚙️  CONFIGURATION
+├── 📄 docker-compose.yml           ← Docker setup
+├── 📄 .env.example                 ← Environment template
+│
+│
+├── 🎨 FRONTEND (React + TypeScript)
+├── frontend/
+│   ├── 📦 node_modules/            ← Dependencies (tự tạo sau npm install)
+│   ├── public/
+│   │   ├── index.html
+│   │   ├── manifest.json
+│   │   ├── robots.txt
+│   │   └── config.json            ← Frontend configuration
+│   │
+│   ├── src/
+│   │   ├── 💻 COMPONENTS
+│   │   ├── components/
+│   │   │   ├── FileUpload.tsx              ← CSV upload & preview
+│   │   │   ├── ModelConfigurator.tsx       ← Model selection & params
+│   │   │   ├── MetricsChart.tsx            ← Acc, AUC-ROC, F1 charts
+│   │   │   ├── FeatureChart.tsx            ← Top 5 features chart
+│   │   │   ├── DefaultRateChart.tsx        ← Default rate trend
+│   │   │   └── index.ts                    ← Exports
+│   │   │
+│   │   ├── 📖 PAGES
+│   │   ├── pages/
+│   │   │   ├── IndividualModelPage.tsx    ← Single model training
+│   │   │   ├── CompareModelsPage.tsx      ← Multi-model comparison
+│   │   │   └── index.ts
+│   │   │
+│   │   ├── 🪝 HOOKS
+│   │   ├── hooks/
+│   │   │   ├── useTraining.ts              ← Training state management
+│   │   │   └── index.ts
+│   │   │
+│   │   ├── 🛠️  UTILITIES
+│   │   ├── utils/
+│   │   │   ├── helpers.ts                  ← Formatting, sorting helpers
+│   │   │   └── index.ts
+│   │   │
+│   │   ├── 📋 TYPES
+│   │   ├── types/
+│   │   │   └── index.ts                    ← TypeScript interfaces
+│   │   │
+│   │   ├── 🔌 API
+│   │   ├── api.ts                          ← Axios HTTP client
+│   │   │
+│   │   ├── 🎮 MAIN APP
+│   │   ├── App.tsx                         ← Routing, AppBar
+│   │   ├── App.css
+│   │   ├── App.test.tsx
+│   │   ├── index.tsx
+│   │   ├── index.css
+│   │   │
+│   │   ├── 🧩 REACT CONFIG
+│   │   ├── react-app-env.d.ts
+│   │   ├── reportWebVitals.ts
+│   │   ├── setupTests.ts
+│   │   └── logo.svg
+│   │
+│   ├── 📦 CONFIG FILES
+│   ├── package.json                 ← Node dependencies & scripts
+│   ├── tsconfig.json                ← TypeScript config
+│   ├── .env                         ← Environment variables
+│   ├── Dockerfile                   ← Docker image
+│   └── .gitignore
+│
+│
+├── 🔧 BACKEND (Flask + Python)
+├── backend/
+│   ├── 🌐 FLASK SERVER
+│   ├── app.py                               ← Main Flask API server
+│   │                                         (Health, Upload, Train, Results, Compare)
+│   │
+│   ├── 🎓 TRAINING SYSTEM
+│   ├── train_wrapper.py                     ← Wrapper for training scripts
+│   │
+│   ├── 🧪 UTILITIES
+│   ├── generate_sample_data.py              ← Sample data generator
+│   │
+│   ├── 📦 DEPENDENCIES
+│   ├── requirements.txt                     ← Python packages
+│   ├── Dockerfile                           ← Docker image
+│   ├── .gitignore
+│   │
+│   ├── 📁 RUNTIME DIRECTORIES (tự tạo)
+│   ├── uploads/                     ← Input CSV files
+│   ├── results/                     ← Training results
+│   │   ├── ann/                     ← ANN results
+│   │   │   ├── ann_model.pkl
+│   │   │   ├── metrics_test.json
+│   │   │   ├── feature_influence_analysis_ann.csv
+│   │   │   └── training_history.json
+│   │   ├── lr/                      ← LR results
+│   │   ├── xgb/                     ← XGBoost results
+│   │   └── tree/                    ← Decision Tree results
+│   │
+│   └── ⚠️  CẦN COPY TỪ PROJECT CŨ
+│       ├── train_ann.py              ← ANN training
+│       ├── train_lr.py               ← Logistic Regression training
+│       ├── train_xgb.py              ← XGBoost training
+│       ├── train_tree.py             ← Decision Tree training
+│       └── spilit.py                 ← Utility functions
+
+
+🎯 QUICK START FLOW
+===================
+
+1. SETUP (Lần đầu)
+   ┌──────────────────────────┐
+   │ Cài dependencies:        │
+   │ - pip install -r backend/requirements.txt
+   │ - cd frontend && npm install
+   │ Copy training scripts từ project cũ
+   └──────────────────────────┘
+
+2. VERIFY
+   ┌──────────────────────────┐
+   │ python verify_setup.py   │ ← Kiểm tra setup
+   └──────────────────────────┘
+
+3. RUN
+   ┌──────────────────────────┐
+   │ start.bat (Windows)      │ ← Chạy cả 2 servers
+   │ ./start.sh (Mac/Linux)   │
+   │ hoặc chạy manual         │
+   └──────────────────────────┘
+
+4. OPEN BROWSER
+   ┌──────────────────────────┐
+   │ http://localhost:3000    │
+   └──────────────────────────┘
+
+5. USE
+   ┌──────────────────────────┐
+   │ Upload CSV               │
+   │ → Select Model           │
+   │ → Train                  │
+   │ → View Results           │
+   │ → Compare Models         │
+   └──────────────────────────┘
+
+
+📊 DATA FLOW
+============
+
+                 📱 Browser
+                    │
+         ┌──────────┴──────────┐
+         │                     │
+         ▼                     ▼
+   React App              Recharts
+   (Port 3000)            Charts
+         │
+         │ Axios HTTP
+         │
+         ▼
+    Flask API
+    (Port 5000)
+         │
+    ┌────┼────┐
+    ▼    ▼    ▼
+   File Data Model
+   Upload Parse Train
+         │         │
+         ▼         ▼
+      uploads/  Python Scripts
+                (train_*.py)
+                     │
+                     ▼
+                 results/
+
+
+🔌 API ENDPOINTS
+================
+
+GET  /health                    → Server health check
+POST /upload                    → Upload CSV file
+POST /train                     → Train model
+GET  /results/<model_type>      → Get model results
+POST /compare                   → Compare all models
+GET  /models                    → List available models
+
+
+🧠 MODELS SUPPORTED
+===================
+
+1. ANN (Artificial Neural Network)
+   ├── Params: dropout, batchnorm, lr, weight_decay
+   ├── Best For: Complex patterns
+   └── Speed: Medium-Slow
+
+2. Logistic Regression
+   ├── Params: C, penalty (L1/L2)
+   ├── Best For: Interpretability, speed
+   └── Speed: Fast
+
+3. XGBoost
+   ├── Params: max_depth, learning_rate, n_estimators
+   ├── Best For: Performance, feature importance
+   └── Speed: Medium
+
+4. Decision Tree
+   ├── Params: max_depth, min_samples_leaf, criterion
+   ├── Best For: Interpretability
+   └── Speed: Fast
+
+
+📱 UI PAGES
+===========
+
+Tab 1: Individual Model
+├── Setup Section
+│   ├── File Upload
+│   ├── Model Selection
+│   └── Parameters Config
+└── Results Section
+    ├── Metrics Charts (Acc, AUC, F1)
+    ├── Default Rate Charts
+    └── Feature Importance Chart
+
+Tab 2: Compare Models
+├── Metrics Comparison Table
+├── Metrics Comparison Charts
+└── Feature Importance by Model
+
+
+📝 KEY FILES
+============
+
+START HERE:
+✨ QUICKSTART.md       ← First time? Read this!
+
+DOCUMENTATION:
+📖 README.md           ← Project overview
+📖 SETUP.md            ← Detailed setup
+📖 DEVELOPMENT.md      ← For developers
+📖 PROJECT_OVERVIEW.md ← Architecture & structure
+📖 NEXT_STEPS.md       ← What to do after creation
+
+SCRIPTS:
+🔧 start.bat           ← Windows launcher
+🔧 start.sh            ← Mac/Linux launcher
+🔧 verify_setup.py     ← Setup verification
+
+
+💾 CONFIG FILES
+===============
+
+Frontend:
+├── .env                ← API URL
+├── public/config.json  ← App config
+└── package.json        ← Dependencies
+
+Backend:
+├── app.py              ← Server config (ports, folders)
+├── requirements.txt    ← Python packages
+└── Dockerfile          ← Container config
+
+
+✅ REQUIREMENTS CHECKLIST
+=========================
+
+Software:
+☐ Python 3.8+
+☐ Node.js 14+
+☐ npm or yarn
+☐ pip (comes with Python)
+
+Project Setup:
+☐ Clone/unzip this project
+☐ Copy train_*.py & spilit.py from old project
+☐ Run pip install -r backend/requirements.txt
+☐ Run npm install in frontend folder
+☐ Run python verify_setup.py
+
+Ready to Run:
+☐ python app.py (backend)
+☐ npm start (frontend)
+☐ http://localhost:3000 (browser)
+
+
+🎓 LEARNING RESOURCES
+====================
+
+Frontend:
+- React: https://react.dev
+- TypeScript: https://www.typescriptlang.org
+- Material-UI: https://mui.com
+- Recharts: https://recharts.org
+
+Backend:
+- Flask: https://flask.palletsprojects.com
+- Pandas: https://pandas.pydata.org
+- PyTorch: https://pytorch.org
+- XGBoost: https://xgboost.readthedocs.io
+
+
+🚀 NEXT ACTIONS
+===============
+
+1. 📖 Read QUICKSTART.md for fastest setup
+2. 📁 Copy training scripts from old project
+3. 🔍 Run verify_setup.py to check everything
+4. ▶️  Run start.bat (Windows) or ./start.sh (Mac/Linux)
+5. 🌐 Open http://localhost:3000
+6. 📤 Upload CSV and start training!
+
+
+✨ That's it! You're ready to go! ✨
+
