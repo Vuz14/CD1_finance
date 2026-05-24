@@ -1,52 +1,49 @@
 @echo off
+setlocal
+
 echo.
 echo ==========================================
-echo    ML Model Trainer - Full Stack App
+echo    CD1 Finance - Backend + Frontend
 echo ==========================================
 echo.
 
-REM Check if we're in the correct directory
-if not exist "frontend" (
-    echo ERROR: frontend directory not found!
-    echo Please run this script from the project root directory.
-    pause
+if not exist "backend" (
+    echo ERROR: backend directory not found.
     exit /b 1
 )
 
-REM Create necessary directories
-if not exist "backend\results" mkdir backend\results
-if not exist "backend\uploads" mkdir backend\uploads
-
-REM Install frontend dependencies if needed
-if not exist "frontend\node_modules" (
-    echo.
-    echo Installing frontend dependencies...
-    cd frontend
-    call npm install
-    cd ..
+if not exist "frontend\package.json" (
+    echo ERROR: frontend package.json not found.
+    exit /b 1
 )
 
-REM Start backend in a new window
-echo.
-echo Starting Backend Server...
-start "Backend Server" cmd /k "cd backend && python app.py"
+if not exist "backend\uploads" mkdir backend\uploads
+if not exist "backend\results" mkdir backend\results
+if not exist ".venv\Scripts\python.exe" (
+    echo Creating Python virtual environment...
+    python -m venv .venv
+)
 
-REM Wait a moment for backend to start
-timeout /t 3 /nobreak
+echo Installing backend dependencies into .venv...
+.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 
-REM Start frontend in a new window
-echo Starting Frontend Server...
-start "Frontend Server" cmd /k "cd frontend && npm start"
+if not exist "frontend\node_modules" (
+    echo Installing frontend dependencies...
+    pushd frontend
+    call npm install
+    popd
+)
 
-echo.
-echo ==========================================
-echo Services are starting...
+echo Starting backend at http://localhost:5000
+start "CD1 Backend" cmd /k "cd /d %CD%\backend && %CD%\.venv\Scripts\python.exe -m scripts.serve"
+
+timeout /t 3 /nobreak > nul
+
+echo Starting frontend at http://localhost:3000
+start "CD1 Frontend" cmd /k "cd /d %CD%\frontend && npm start"
+
 echo.
 echo Backend:  http://localhost:5000
 echo Frontend: http://localhost:3000
 echo.
-echo Close these windows to stop the servers.
-echo ==========================================
-echo.
-
 pause

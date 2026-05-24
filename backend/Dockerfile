@@ -22,5 +22,5 @@ RUN mkdir -p uploads results
 # Expose port
 EXPOSE 5000
 
-# Run Flask app
-CMD ["python", "app.py"]
+# Run Flask API
+CMD ["python", "-m", "scripts.serve"]

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   backend:
     build:
@@ -9,12 +7,12 @@ services:
       - "5000:5000"
     volumes:
       - ./backend:/app
-      - ./uploads:/app/uploads
-      - ./results:/app/results
+      - ./backend/uploads:/app/uploads
+      - ./backend/results:/app/results
     environment:
       - FLASK_ENV=development
-      - FLASK_APP=app.py
-    command: python app.py
+      - FLASK_APP=api.server
+    command: python -m scripts.serve
 
   frontend:
     build:
@@ -26,6 +24,6 @@ services:
       - ./frontend:/app
       - /app/node_modules
     environment:
-      - REACT_APP_API_URL=http://localhost:5000
+      - VITE_API_URL=http://localhost:5000
     depends_on:
       - backend

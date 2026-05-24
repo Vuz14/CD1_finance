@@ -1,44 +1,38 @@
 #!/bin/bash
-# Script to run entire application
+set -e
 
-echo "🚀 Starting ML Model Trainer Application"
+echo "Starting CD1 Finance"
 
-# Check if node_modules exists
-if [ ! -d "frontend/node_modules" ]; then
-    echo "📦 Installing frontend dependencies..."
-    cd frontend
-    npm install
-    cd ..
+mkdir -p backend/uploads backend/results
+
+if [ ! -x ".venv/Scripts/python.exe" ] && [ ! -x ".venv/bin/python" ]; then
+  echo "Creating Python virtual environment..."
+  python -m venv .venv
 fi
 
-# Create results directory
-mkdir -p backend/results
-mkdir -p backend/uploads
+if [ -x ".venv/Scripts/python.exe" ]; then
+  PYTHON=".venv/Scripts/python.exe"
+else
+  PYTHON=".venv/bin/python"
+fi
 
-# Start backend
-echo "🔧 Starting backend server..."
-cd backend
-python app.py &
+echo "Installing backend dependencies into .venv..."
+$PYTHON -m pip install -r backend/requirements.txt
+
+if [ ! -d "frontend/node_modules" ]; then
+  echo "Installing frontend dependencies..."
+  (cd frontend && npm install)
+fi
+
+echo "Starting backend at http://localhost:5000"
+(cd backend && ../$PYTHON -m scripts.serve) &
 BACKEND_PID=$!
 
-# Wait for backend to start
 sleep 3
 
-# Start frontend
-echo "🎨 Starting frontend server..."
-cd ../frontend
-npm start &
+echo "Starting frontend at http://localhost:3000"
+(cd frontend && npm start) &
 FRONTEND_PID=$!
 
-# Wait for services
-echo "⏳ Waiting for services to start..."
-echo "📍 Backend: http://localhost:5000"
-echo "📍 Frontend: http://localhost:3000"
-echo ""
-echo "Press Ctrl+C to stop both servers"
-
-# Handle cleanup
-trap "kill $BACKEND_PID $FRONTEND_PID" INT
-
-# Wait for both processes
+trap "kill $BACKEND_PID $FRONTEND_PID" INT TERM
 wait $BACKEND_PID $FRONTEND_PID
