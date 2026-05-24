@@ -58,9 +58,27 @@ def load_features(model_type: str) -> List[Dict[str, Any]]:
 
 def predict_all_models(features: Dict[str, Any]) -> Dict[str, Any]:
     ensemble = EnsembleStackingClassifier().predict_from_features(features)
+    ensemble["ensemble"].update(build_mdcl_context(ensemble["ensemble"]["probability"]))
     return {
         "predictions": ensemble["individual"],
         "ensemble": ensemble["ensemble"],
+    }
+
+
+def build_mdcl_context(probability_percent: float) -> Dict[str, Any]:
+    base_psis = []
+    for model_type in MODEL_TYPES:
+        metrics = load_metrics(model_type)
+        if "PSI" in metrics:
+            base_psis.append(float(metrics["PSI"]))
+    psi_mean = float(np.mean(base_psis)) if base_psis else 0.0
+    adaptive_threshold = 0.5 - (0.3 * min(psi_mean, 0.5))
+    probability = probability_percent / 100.0
+    return {
+        "psi_mean": round(psi_mean, 6),
+        "adaptive_threshold": round(adaptive_threshold, 6),
+        "adjusted_risk_level": "HIGH RISK" if probability >= adaptive_threshold else "LOW RISK",
+        "mdcl_active": psi_mean > 0.15,
     }
 
 
@@ -156,7 +174,7 @@ def get_models():
         "models": [
             {"id": "ann", "name": "Artificial Neural Network", "params": ["dropout", "batchnorm", "lr", "weight_decay", "epochs"]},
             {"id": "lr", "name": "Logistic Regression", "params": ["C", "penalty"]},
-            {"id": "tree", "name": "Random Forest", "params": ["n_estimators", "max_depth", "min_samples_leaf", "criterion"]},
+            {"id": "tree", "name": "LightGBM", "params": ["n_estimators", "learning_rate", "num_leaves", "max_depth", "min_child_samples"]},
             {"id": "xgb", "name": "XGBoost", "params": ["max_depth", "learning_rate", "n_estimators", "subsample", "colsample_bytree"]},
             {"id": "ensemble", "name": "Heterogeneous Stacking Ensemble", "params": []},
         ]

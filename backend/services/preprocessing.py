@@ -7,7 +7,6 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from sklearn.impute import KNNImputer
-from sklearn.preprocessing import StandardScaler
 
 LOGGER = logging.getLogger("cd1_finance.preprocessing")
 
@@ -107,7 +106,6 @@ class DataPreprocessor:
             iqr = q3 - q1
             out[col] = out[col].clip(q1 - 1.5 * iqr, q3 + 1.5 * iqr)
             out[col] = out[col].clip(out[col].quantile(0.05), out[col].quantile(0.95))
-        out[x_cols] = StandardScaler().fit_transform(out[x_cols])
         return out
 
 

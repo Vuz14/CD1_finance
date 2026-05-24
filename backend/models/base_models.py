@@ -11,8 +11,9 @@ import torch.nn as nn
 import torch.optim as optim
 from imblearn.combine import SMOTEENN
 from imblearn.over_sampling import SMOTE
+from lightgbm import LGBMClassifier
 from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
@@ -123,29 +124,38 @@ class FinancialModelPipeline(BaseTrainingPipeline):
     def build_estimator(self, params: Optional[Dict[str, Any]] = None, input_dim: Optional[int] = None):
         params = params or {}
         if self.model_type == "lr":
+            lr_base = LogisticRegression(
+                solver="saga",
+                penalty=params.get("penalty", "l2"),
+                C=float(params.get("C", 1.0)),
+                max_iter=5000,
+                class_weight="balanced",
+                random_state=RANDOM_STATE,
+            )
             return Pipeline([
                 ("scaler", StandardScaler()),
-                ("clf", LogisticRegression(
-                    solver="saga",
-                    penalty=params.get("penalty", "l2"),
-                    C=float(params.get("C", 1.0)),
-                    max_iter=5000,
-                    class_weight="balanced",
-                    random_state=RANDOM_STATE,
+                ("clf", CalibratedClassifierCV(
+                    estimator=lr_base,
+                    method=params.get("calibration_method", "sigmoid"),
+                    cv=int(params.get("calibration_cv", 3)),
                 )),
             ])
         if self.model_type == "tree":
             return Pipeline([
-                ("scaler", StandardScaler()),
-                ("clf", RandomForestClassifier(
+                ("clf", LGBMClassifier(
                     n_estimators=int(params.get("n_estimators", 300)),
-                    max_depth=params.get("max_depth", 4),
-                    min_samples_leaf=params.get("min_samples_leaf", 20),
-                    min_samples_split=params.get("min_samples_split", 50),
-                    criterion=params.get("criterion", "gini"),
+                    learning_rate=float(params.get("learning_rate", 0.03)),
+                    num_leaves=int(params.get("num_leaves", 15)),
+                    max_depth=int(params.get("max_depth", 4)),
+                    min_child_samples=int(params.get("min_child_samples", 25)),
+                    subsample=float(params.get("subsample", 0.85)),
+                    colsample_bytree=float(params.get("colsample_bytree", 0.85)),
+                    reg_alpha=float(params.get("reg_alpha", 0.1)),
+                    reg_lambda=float(params.get("reg_lambda", 1.0)),
                     class_weight="balanced",
                     n_jobs=int(params.get("n_jobs", -1)),
                     random_state=RANDOM_STATE,
+                    verbosity=-1,
                 )),
             ])
         if self.model_type == "xgb":
@@ -258,7 +268,10 @@ class FinancialModelPipeline(BaseTrainingPipeline):
     def predict_proba(self, frame: pd.DataFrame) -> pd.Series:
         if self.model is None:
             self.model = joblib.load(self.model_dir / f"pd_{self.model_type}_model.pkl")
-        X = select_feature_frame(frame, self.selected_features)
+        from core.utils import load_feature_schema
+
+        feature_schema = load_feature_schema(self.model_type)
+        X = select_feature_frame(frame, feature_schema)
         return pd.Series(self.model.predict_proba(X)[:, 1], index=frame.index)
 
 

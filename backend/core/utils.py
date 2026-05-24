@@ -146,7 +146,6 @@ def load_model_artifact(model_type: str):
     candidates = [
         model_dir / f"pd_{model_type}_model.pkl",
         model_dir / "pd_model.pkl",
-        model_dir / "pd_tree_model.pkl",
     ]
     for path in candidates:
         if path.exists():
