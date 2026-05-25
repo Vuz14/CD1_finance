@@ -159,11 +159,13 @@ def get_results(model_type: str):
         return api_error("Chưa có kết quả huấn luyện.", 404)
     history_path = RESULTS_DIR / model_type / "metrics_by_year.csv"
     history = pd.read_csv(history_path).to_dict("records") if history_path.exists() else []
+    selected_features = load_feature_schema(model_type)
     return jsonify({
         "success": True,
         "model_type": model_type,
         "metrics": load_metrics(model_type),
         "features": load_features(model_type),
+        "selected_features": selected_features,
         "history": history,
     })
 
@@ -183,7 +185,11 @@ def get_models():
 
 @app.get("/feature-schema")
 def get_feature_schema():
-    features = infer_feature_schema()
+    model_type = request.args.get("model_type")
+    if model_type and model_type in list(MODEL_TYPES) + ["ensemble"]:
+        features = load_feature_schema(model_type)
+    else:
+        features = infer_feature_schema()
     return jsonify({"success": True, "features": features})
 
 
