@@ -1,0 +1,30 @@
+{
+    "target_column": "financial_distress",
+    "display_name_vi": "Kiệt quệ tài chính",
+    "status": "reproducibly_generated_proxy_pending_source_document_audit",
+    "prediction_horizon": "Feature year T is joined to an independently computed distress event at T+1",
+    "source_rule": "At least one of: losses for three consecutive years; accumulated losses exceeding contributed charter capital; negative shareholders' equity.",
+    "report_source": "Report.docx, paragraph 49",
+    "research_support": [
+        "10.21511/imfi.16(1).2019.22",
+        "10.21511/imfi.17(2).2020.29",
+        "10.33301/2014.16.03.04"
+    ],
+    "publication_blocker": true,
+    "generation_script": "backend/scripts/build_financial_distress_labels.py",
+    "research_feature_years": "2016-2023",
+    "excluded_boundary_years": {
+        "2015": "2014 net income unavailable for the three-consecutive-loss criterion at event year 2016",
+        "2024": "event-year 2025 statements unavailable"
+    },
+    "required_audit_fields": [
+        "company",
+        "event_year",
+        "criterion_triggered",
+        "source_document",
+        "source_url_or_file",
+        "verified_by",
+        "verified_at"
+    ],
+    "methodological_requirement": "Year must denote feature year t and the target must be independently observed at t+1. Every positive row must be traceable to the triggering criterion and source document."
+}

@@ -18,12 +18,22 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 UPLOAD_DIR = BASE_DIR / "uploads"
 RESULTS_DIR = BASE_DIR / "results"
 MODEL_TYPES = ("ann", "lr", "tree", "xgb")
-FEATURE_COLUMNS = [f"X{i}" for i in range(1, 14)]
-TARGET_COLUMN = "default_final"
-ID_COLUMNS = ["STT", "MaCP", "Year"]
-DROP_COLUMNS = [TARGET_COLUMN, "STT", "MaCP", "Year", "split"]
+FEATURE_COLUMNS = [
+    "ROA",
+    "ROE",
+    "Gross_Margin",
+    "Current_Ratio",
+    "Debt_to_Assets",
+    "Cash_Ratio",
+    "Inventory_Turnover",
+    "Receivables_Turnover",
+]
+TARGET_COLUMN = "financial_distress"
+ID_COLUMNS = ["STT", "MaCP", "Year", "EventYear"]
+DROP_COLUMNS = [TARGET_COLUMN, "STT", "MaCP", "Year", "EventYear", "split"]
 RANDOM_STATE = int(os.getenv("CD1_RANDOM_STATE", "42"))
 MIN_TRAIN_YEARS = int(os.getenv("CD1_MIN_TRAIN_YEARS", "1"))
+MIN_TEST_SAMPLES = int(os.getenv("CD1_MIN_TEST_SAMPLES", "20"))
 DEFAULT_DATASET = os.getenv("CD1_DATASET", "dataset/Processed_EWS_Final.csv")
 
 os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(max(1, os.cpu_count() or 1)))

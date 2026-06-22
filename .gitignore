@@ -9,6 +9,7 @@ venv/
 backend/uploads/
 backend/results/
 backend/dataset/
+research/
 *.log
 
 # Frontend
@@ -21,3 +22,6 @@ frontend/*.tsbuildinfo
 .idea/
 .env
 .DS_Store
+docs/reports/REPORT_REVISION_NOTES.md
+docs/README.md
+docs/reports/Report_revised.docx

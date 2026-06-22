@@ -1,0 +1,42 @@
+{
+    "ann": {
+        "use_resampling": false,
+        "use_feature_selection": false,
+        "epochs": 40,
+        "dropout": 0.2,
+        "batchnorm": true,
+        "lr": 0.001,
+        "weight_decay": 0.00001
+    },
+    "lr": {
+        "use_resampling": false,
+        "use_feature_selection": false,
+        "C": 1.0,
+        "penalty": "l2",
+        "calibration_method": "sigmoid",
+        "calibration_cv": 3
+    },
+    "tree": {
+        "use_resampling": false,
+        "use_feature_selection": false,
+        "n_estimators": 300,
+        "learning_rate": 0.03,
+        "num_leaves": 15,
+        "max_depth": 4,
+        "min_child_samples": 25,
+        "subsample": 0.85,
+        "colsample_bytree": 0.85,
+        "reg_alpha": 0.1,
+        "reg_lambda": 1.0,
+        "n_jobs": -1
+    },
+    "xgb": {
+        "use_resampling": false,
+        "use_feature_selection": false,
+        "n_estimators": 160,
+        "max_depth": 4,
+        "learning_rate": 0.05,
+        "subsample": 0.85,
+        "colsample_bytree": 0.85
+    }
+}

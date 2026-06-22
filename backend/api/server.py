@@ -58,21 +58,26 @@ def load_features(model_type: str) -> List[Dict[str, Any]]:
 
 def predict_all_models(features: Dict[str, Any]) -> Dict[str, Any]:
     ensemble = EnsembleStackingClassifier().predict_from_features(features)
-    ensemble["ensemble"].update(build_mdcl_context(ensemble["ensemble"]["probability"]))
+    ensemble["ensemble"].update(
+        build_mdcl_context(
+            ensemble["ensemble"]["probability"],
+            float(ensemble["ensemble"].get("decision_threshold", 0.5)),
+        )
+    )
     return {
         "predictions": ensemble["individual"],
         "ensemble": ensemble["ensemble"],
     }
 
 
-def build_mdcl_context(probability_percent: float) -> Dict[str, Any]:
+def build_mdcl_context(probability_percent: float, base_threshold: float = 0.5) -> Dict[str, Any]:
     base_psis = []
     for model_type in MODEL_TYPES:
         metrics = load_metrics(model_type)
         if "PSI" in metrics:
             base_psis.append(float(metrics["PSI"]))
     psi_mean = float(np.mean(base_psis)) if base_psis else 0.0
-    adaptive_threshold = 0.5 - (0.3 * min(psi_mean, 0.5))
+    adaptive_threshold = max(0.001, base_threshold * (1.0 - 0.6 * min(psi_mean, 0.5)))
     probability = probability_percent / 100.0
     return {
         "psi_mean": round(psi_mean, 6),

@@ -12,7 +12,8 @@ LOGGER = logging.getLogger("cd1_finance.preprocessing")
 
 
 def _norm(text: object) -> str:
-    value = unicodedata.normalize("NFKD", str(text)).encode("ascii", "ignore").decode("ascii")
+    source = str(text).replace("Đ", "D").replace("đ", "d")
+    value = unicodedata.normalize("NFKD", source).encode("ascii", "ignore").decode("ascii")
     return value.lower().strip()
 
 
@@ -29,10 +30,14 @@ class FinancialIndicatorCalculator:
             revenue = FinancialIndicatorCalculator._get_value(out, idx, cols["revenue"], 1.0)
             cogs = FinancialIndicatorCalculator._get_value(out, idx, cols["cogs"], 0.0)
             gross_profit = FinancialIndicatorCalculator._get_value(out, idx, cols["gross_profit"], revenue - cogs)
+            net_income = FinancialIndicatorCalculator._get_value(out, idx, cols["net_income"], 0.0)
             pretax_income = FinancialIndicatorCalculator._get_value(out, idx, cols["pretax_income"], 0.0)
             total_assets = FinancialIndicatorCalculator._get_value(out, idx, cols["total_assets"], 1.0)
             equity = FinancialIndicatorCalculator._get_value(out, idx, cols["equity"], 1.0)
-            total_liabilities = FinancialIndicatorCalculator._get_value(out, idx, cols["total_liabilities"], max(0.0, total_assets - equity))
+            identity_liabilities = total_assets - equity
+            # Keep inference identical to the research dataset reconstruction.
+            # The scraped reported-liabilities field is shifted for many rows.
+            total_liabilities = identity_liabilities
             current_assets = FinancialIndicatorCalculator._get_value(out, idx, cols["current_assets"], 0.0)
             current_liabilities = FinancialIndicatorCalculator._get_value(out, idx, cols["current_liabilities"], 1.0)
             inventory = FinancialIndicatorCalculator._get_value(out, idx, cols["inventory"], 0.0)
@@ -54,6 +59,14 @@ class FinancialIndicatorCalculator:
             out.at[idx, "X11"] = cogs / inventory if inventory else 0.0
             out.at[idx, "X12"] = revenue / receivables if receivables else 0.0
             out.at[idx, "X13"] = revenue / total_assets if total_assets else 0.0
+            out.at[idx, "ROA"] = net_income / total_assets if total_assets else 0.0
+            out.at[idx, "ROE"] = net_income / equity if equity else 0.0
+            out.at[idx, "Gross_Margin"] = gross_profit / revenue if revenue else 0.0
+            out.at[idx, "Current_Ratio"] = current_assets / current_liabilities if current_liabilities else 0.0
+            out.at[idx, "Debt_to_Assets"] = total_liabilities / total_assets if total_assets else 0.0
+            out.at[idx, "Cash_Ratio"] = cash / current_liabilities if current_liabilities else 0.0
+            out.at[idx, "Inventory_Turnover"] = cogs / inventory if inventory else 0.0
+            out.at[idx, "Receivables_Turnover"] = revenue / receivables if receivables else 0.0
         return out
 
     @staticmethod
@@ -62,12 +75,13 @@ class FinancialIndicatorCalculator:
             "revenue": ["doanh thu thuan", "tong doanh thu", "thu nhap lai thuan"],
             "cogs": ["gia von hang ban", "chi phi lai"],
             "gross_profit": ["loi nhuan tu hdkd", "loi nhuan gop"],
+            "net_income": ["loi nhuan sau thue thu nhap doanh nghiep", "loi nhuan sau thue"],
             "pretax_income": ["loi nhuan truoc thue"],
             "total_assets": ["tong cong tai san", "tong tai san"],
             "equity": ["von chu so huu"],
-            "total_liabilities": ["tong no phai tra"],
+            "total_liabilities": ["tong no phai tra", "no phai tra"],
             "current_assets": ["tai san ngan han", "tai san luu dong", "tien gui khach hang"],
-            "current_liabilities": ["no phai tra ngan han", "cac khoan no"],
+            "current_liabilities": ["no phai tra ngan han", "no ngan han", "cac khoan no"],
             "inventory": ["hang ton kho"],
             "cash": ["tien mat", "tien va cac khoan tuong duong tien"],
             "receivables": ["phai thu"],
@@ -77,9 +91,10 @@ class FinancialIndicatorCalculator:
         found: Dict[str, Optional[str]] = {k: None for k in patterns}
         normalized = {col: _norm(col) for col in df.columns}
         for key, keys in patterns.items():
-            for col, text in normalized.items():
-                if any(p in text for p in keys):
-                    found[key] = col
+            for pattern in keys:
+                match = next((col for col, text in normalized.items() if pattern in text), None)
+                if match is not None:
+                    found[key] = match
                     break
         return found
 
@@ -124,7 +139,11 @@ def process_raw_data(file_path: str, output_path: Optional[str] = None) -> pd.Da
         df.insert(0, "STT", range(1, len(df) + 1))
     out = FinancialIndicatorCalculator.calculate_indicators(df)
     out = DataPreprocessor.preprocess(out)
-    keep = [c for c in ["STT", "MaCP", "Year"] + [f"X{i}" for i in range(1, 14)] if c in out.columns]
+    named_features = [
+        "ROA", "ROE", "Gross_Margin", "Current_Ratio", "Debt_to_Assets",
+        "Cash_Ratio", "Inventory_Turnover", "Receivables_Turnover",
+    ]
+    keep = [c for c in ["STT", "MaCP", "Year"] + named_features + [f"X{i}" for i in range(1, 14)] if c in out.columns]
     out = out[keep]
     if output_path:
         out.to_csv(output_path, index=False, encoding="utf-8-sig")

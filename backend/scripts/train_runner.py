@@ -15,10 +15,17 @@ from models.base_models import train_model
 from models.ensemble_model import EnsembleStackingClassifier
 
 
+def load_default_params() -> Dict[str, Any]:
+    path = BACKEND_DIR / "config" / "training_params.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
 def run_training(model_type: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     setup_utf8()
-    params = params or {}
+    supplied_params = params or {}
+    defaults = load_default_params()
     if model_type == "all":
+        params = supplied_params or defaults
         results: Dict[str, Any] = {}
         for name in MODEL_TYPES:
             result = train_model(name, params.get(name, {}))
@@ -30,6 +37,7 @@ def run_training(model_type: str, params: Optional[Dict[str, Any]] = None) -> Di
         return {"success": True, "model_type": "ensemble", "metrics": metrics}
     if model_type not in MODEL_TYPES:
         raise ValueError(f"Model type không hợp lệ: {model_type}")
+    params = supplied_params or defaults.get(model_type, {})
     result = train_model(model_type, params)
     return {
         "success": True,
@@ -43,9 +51,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Unified CD1 finance training runner")
     parser.add_argument("model_type", choices=list(MODEL_TYPES) + ["ensemble", "all"])
     parser.add_argument("--params", default="{}", help="JSON hyperparameters")
+    parser.add_argument("--params-file", help="Path to a UTF-8 JSON hyperparameter file")
     args = parser.parse_args()
     try:
-        params = json.loads(args.params)
+        params = json.loads(Path(args.params_file).read_text(encoding="utf-8")) if args.params_file else json.loads(args.params)
         print(json.dumps(run_training(args.model_type, params), ensure_ascii=False))
     except Exception as exc:
         print(json.dumps({"success": False, "error": str(exc)}, ensure_ascii=False))

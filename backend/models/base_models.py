@@ -12,7 +12,7 @@ import torch.optim as optim
 from imblearn.combine import SMOTEENN
 from imblearn.over_sampling import SMOTE
 from lightgbm import LGBMClassifier
-from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
@@ -20,9 +20,10 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from torch.utils.data import DataLoader, TensorDataset
 from xgboost import XGBClassifier
 
-from core.config import FEATURE_COLUMNS, MIN_TRAIN_YEARS, RANDOM_STATE, RESULTS_DIR, TARGET_COLUMN, get_device
+from core.config import FEATURE_COLUMNS, MIN_TEST_SAMPLES, MIN_TRAIN_YEARS, RANDOM_STATE, RESULTS_DIR, TARGET_COLUMN, get_device
 from core.pipeline import BaseTrainingPipeline, FoldResult, TrainingResult
 from core.utils import (
+    build_run_manifest,
     evaluate_binary_classifier,
     load_training_frame,
     population_stability_index,
@@ -33,6 +34,24 @@ from core.utils import (
 from services.feature_analysis import select_hybrid_features
 
 LOGGER = logging.getLogger("cd1_finance.models")
+
+
+class QuantileClipper(TransformerMixin, BaseEstimator):
+    """Fold-fitted winsorization without learning from future observations."""
+
+    def __init__(self, lower: float = 0.01, upper: float = 0.99) -> None:
+        self.lower = lower
+        self.upper = upper
+
+    def fit(self, X, y=None):  # type: ignore[no-untyped-def]
+        values = np.asarray(X, dtype=float)
+        self.lower_bounds_ = np.nanquantile(values, self.lower, axis=0)
+        self.upper_bounds_ = np.nanquantile(values, self.upper, axis=0)
+        return self
+
+    def transform(self, X):  # type: ignore[no-untyped-def]
+        values = np.asarray(X, dtype=float)
+        return np.clip(values, self.lower_bounds_, self.upper_bounds_)
 
 
 class TorchANN(nn.Module):  # type: ignore[misc]
@@ -54,7 +73,7 @@ class TorchANN(nn.Module):  # type: ignore[misc]
         return self.model(x)
 
 
-class ANNSklearnWrapper(BaseEstimator, ClassifierMixin):
+class ANNSklearnWrapper(ClassifierMixin, BaseEstimator):
     def __init__(self, input_dim: int, dropout: float = 0.2, batchnorm: bool = True, lr: float = 1e-3, weight_decay: float = 1e-5, epochs: int = 20):
         self.input_dim = input_dim
         self.dropout = dropout
@@ -62,12 +81,14 @@ class ANNSklearnWrapper(BaseEstimator, ClassifierMixin):
         self.lr = lr
         self.weight_decay = weight_decay
         self.epochs = epochs
+        self.clipper = QuantileClipper()
         self.scaler = MinMaxScaler()
         self.device = get_device()
         self.model_: Optional[TorchANN] = None
 
     def fit(self, X, y):  # type: ignore[no-untyped-def]
-        X_arr = self.scaler.fit_transform(np.asarray(X, dtype=float))
+        X_clipped = self.clipper.fit_transform(np.asarray(X, dtype=float))
+        X_arr = self.scaler.fit_transform(X_clipped)
         y_arr = np.asarray(y, dtype=float).reshape(-1, 1)
         model = TorchANN(X_arr.shape[1], self.dropout, self.batchnorm).to(self.device)
         self.model_ = model
@@ -96,7 +117,8 @@ class ANNSklearnWrapper(BaseEstimator, ClassifierMixin):
         if self.model_ is None:
             raise ValueError("ANN model chưa được fit.")
         model = self.model_
-        X_arr = self.scaler.transform(np.asarray(X, dtype=float))
+        X_clipped = self.clipper.transform(np.asarray(X, dtype=float))
+        X_arr = self.scaler.transform(X_clipped)
         probs: List[float] = []
         model.eval()
         with torch.no_grad():
@@ -124,24 +146,33 @@ class FinancialModelPipeline(BaseTrainingPipeline):
     def build_estimator(self, params: Optional[Dict[str, Any]] = None, input_dim: Optional[int] = None):
         params = params or {}
         if self.model_type == "lr":
+            penalty = params.get("penalty", "l2")
             lr_base = LogisticRegression(
-                solver="saga",
-                penalty=params.get("penalty", "l2"),
+                solver="lbfgs" if penalty == "l2" else "saga",
+                penalty=penalty,
                 C=float(params.get("C", 1.0)),
                 max_iter=5000,
                 class_weight="balanced",
                 random_state=RANDOM_STATE,
             )
-            return Pipeline([
-                ("scaler", StandardScaler()),
-                ("clf", CalibratedClassifierCV(
+            calibration_cv = int(params.get("calibration_cv", 3))
+            classifier = (
+                CalibratedClassifierCV(
                     estimator=lr_base,
                     method=params.get("calibration_method", "sigmoid"),
-                    cv=int(params.get("calibration_cv", 3)),
-                )),
+                    cv=calibration_cv,
+                )
+                if calibration_cv >= 2
+                else lr_base
+            )
+            return Pipeline([
+                ("clipper", QuantileClipper()),
+                ("scaler", StandardScaler()),
+                ("clf", classifier),
             ])
         if self.model_type == "tree":
             return Pipeline([
+                ("clipper", QuantileClipper()),
                 ("clf", LGBMClassifier(
                     n_estimators=int(params.get("n_estimators", 300)),
                     learning_rate=float(params.get("learning_rate", 0.03)),
@@ -160,6 +191,7 @@ class FinancialModelPipeline(BaseTrainingPipeline):
             ])
         if self.model_type == "xgb":
             return Pipeline([
+                ("clipper", QuantileClipper()),
                 ("scaler", StandardScaler()),
                 ("clf", XGBClassifier(
                     n_estimators=params.get("n_estimators", 160),
@@ -198,6 +230,9 @@ class FinancialModelPipeline(BaseTrainingPipeline):
 
     def fit(self, params: Optional[Dict[str, Any]] = None) -> TrainingResult:
         df = load_training_frame(self.dataset_name)
+        params = params or {}
+        use_resampling = bool(params.get("use_resampling", False))
+        use_feature_selection = bool(params.get("use_feature_selection", False))
         years = sorted(df["Year"].dropna().unique())
         all_predictions: List[pd.DataFrame] = []
         fold_results: List[FoldResult] = []
@@ -208,16 +243,22 @@ class FinancialModelPipeline(BaseTrainingPipeline):
                 continue
             train_df = df[df["Year"] < year]
             test_df = df[df["Year"] == year]
-            if train_df.empty or test_df.empty:
+            if train_df.empty or len(test_df) < MIN_TEST_SAMPLES:
+                LOGGER.warning("Bỏ qua validation year %s vì chỉ có %s mẫu (< %s).", int(year), len(test_df), MIN_TEST_SAMPLES)
                 continue
             X_train_full = select_feature_frame(train_df)
             y_train = train_df[TARGET_COLUMN].astype(int)
             X_test_full = select_feature_frame(test_df, X_train_full.columns.tolist())
-            selected, score_df = select_hybrid_features(X_train_full, y_train)
+            hybrid_selected, score_df = select_hybrid_features(X_train_full, y_train)
+            selected = hybrid_selected if use_feature_selection else X_train_full.columns.tolist()
             X_train, X_test = X_train_full[selected], X_test_full[selected]
-            X_train_res, y_train_res = self._resample(X_train, y_train)
+            X_train_res, y_train_res = self._resample(X_train, y_train) if use_resampling else (X_train, y_train)
 
-            estimator = self.build_estimator(params, input_dim=len(selected))
+            fold_params = dict(params)
+            if self.model_type == "lr":
+                smallest_class = int(y_train_res.value_counts().min())
+                fold_params["calibration_cv"] = min(int(params.get("calibration_cv", 3)), smallest_class)
+            estimator = self.build_estimator(fold_params, input_dim=len(selected))
             LOGGER.info("Train %s fold <= %s, test %s, features=%s, resampled=%s", self.model_type, int(year) - 1, int(year), len(selected), len(X_train_res))
             estimator.fit(X_train_res, y_train_res)
             y_prob = estimator.predict_proba(X_test)[:, 1]
@@ -230,6 +271,7 @@ class FinancialModelPipeline(BaseTrainingPipeline):
             pred = test_df[["STT", "MaCP", "Year", TARGET_COLUMN]].copy()
             pred["Prediction"] = (y_prob >= 0.5).astype(int)
             pred["Probability"] = (y_prob * 100).round(2)
+            pred["ProbabilityRaw"] = y_prob
             pred["pd_default"] = y_prob
             all_predictions.append(pred)
 
@@ -239,22 +281,42 @@ class FinancialModelPipeline(BaseTrainingPipeline):
         predictions = smooth_pd_by_cycle(pd.concat(all_predictions, ignore_index=True))
         y_true_all = predictions[TARGET_COLUMN].astype(int)
         y_prob_all = predictions["pd_default"].astype(float)
-        overall_metrics = evaluate_binary_classifier(y_true_all.to_numpy(), y_prob_all.to_numpy())
+        overall_metrics = evaluate_binary_classifier(y_true_all.to_numpy(), y_prob_all.to_numpy(), include_ci=True)
         overall_metrics["PSI"] = float(np.mean([fr.metrics.get("PSI", 0.0) for fr in fold_results]))
 
         full_X = select_feature_frame(df)
         full_y = df[TARGET_COLUMN].astype(int)
-        self.selected_features, score_df = select_hybrid_features(full_X, full_y)
-        final_X, final_y = self._resample(full_X[self.selected_features], full_y)
+        hybrid_selected, score_df = select_hybrid_features(full_X, full_y)
+        self.selected_features = hybrid_selected if use_feature_selection else full_X.columns.tolist()
+        selected_full_X = full_X[self.selected_features]
+        final_X, final_y = self._resample(selected_full_X, full_y) if use_resampling else (selected_full_X, full_y)
         self.model = self.build_estimator(params, input_dim=len(self.selected_features))
         self.model.fit(final_X, final_y)
 
         joblib.dump(self.model, self.model_dir / f"pd_{self.model_type}_model.pkl")
         save_json(self.model_dir / "feature_schema.json", {"features": self.selected_features})
         save_json(self.model_dir / "best_params.json", params or {})
+        save_json(
+            self.output_dir / "run_manifest.json",
+            build_run_manifest(
+                self.model_type,
+                params or {},
+                df,
+                {
+                    "selected_features": self.selected_features,
+                    "evaluation": "expanding-window OOF",
+                    "minimum_test_year_samples": MIN_TEST_SAMPLES,
+                    "use_resampling": use_resampling,
+                    "use_feature_selection": use_feature_selection,
+                    "outlier_handling": "1st/99th percentile clipping fitted inside each fold",
+                },
+            ),
+        )
         save_json(self.output_dir / "metrics_test.json", overall_metrics)
         pd.DataFrame([{"Year": fr.year, **fr.metrics} for fr in fold_results]).to_csv(self.output_dir / "metrics_by_year.csv", index=False)
-        predictions[["STT", "MaCP", "Year", TARGET_COLUMN, "Prediction", "Probability"]].to_csv(self.output_dir / "predictions_with_probability.csv", index=False)
+        predictions[["STT", "MaCP", "Year", TARGET_COLUMN, "Prediction", "Probability", "ProbabilityRaw"]].to_csv(
+            self.output_dir / "predictions_with_probability.csv", index=False
+        )
         score_df.to_csv(self.output_dir / f"feature_influence_analysis_{self.model_type}.csv", index=False)
 
         return TrainingResult(

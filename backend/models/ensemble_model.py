@@ -10,8 +10,16 @@ from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
 
 from core.config import MODEL_TYPES, RANDOM_STATE, RESULTS_DIR, TARGET_COLUMN
-from core.pipeline import TrainingResult
-from core.utils import evaluate_binary_classifier, load_model_artifact, load_training_frame, prepare_single_input, save_json, select_feature_frame
+from core.utils import (
+    build_run_manifest,
+    evaluate_binary_classifier,
+    find_optimal_threshold,
+    load_json,
+    load_model_artifact,
+    load_training_frame,
+    prepare_single_input,
+    save_json,
+)
 from .base_models import FinancialModelPipeline
 
 LOGGER = logging.getLogger("cd1_finance.ensemble")
@@ -31,6 +39,14 @@ class EnsembleStackingClassifier:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.model_dir.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _new_meta_model(y: pd.Series):
+        base = LogisticRegression(max_iter=3000, class_weight="balanced", random_state=RANDOM_STATE)
+        class_counts = np.bincount(y.astype(int), minlength=2)
+        if len(y) >= 6 and class_counts.min() >= 3:
+            return CalibratedClassifierCV(base, method="sigmoid", cv=min(3, int(class_counts.min())))
+        return base
+
     def _load_oof_matrix(self) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame]:
         merged: Optional[pd.DataFrame] = None
         for model_type in self.base_models:
@@ -39,14 +55,22 @@ class EnsembleStackingClassifier:
                 LOGGER.info("Chưa có OOF của %s, train nhanh model nền.", model_type)
                 FinancialModelPipeline(model_type).fit({})
             df = pd.read_csv(path)
-            cols = ["STT", "MaCP", "Year", TARGET_COLUMN, "Probability"]
+            cols = ["STT", "MaCP", "Year", TARGET_COLUMN, "Probability", "ProbabilityRaw"]
             df = df[[c for c in cols if c in df.columns]].copy()
-            df = df.rename(columns={"Probability": f"{model_type}_prob"})
-            df[f"{model_type}_prob"] = df[f"{model_type}_prob"] / 100.0
+            if "ProbabilityRaw" in df.columns:
+                df = df.rename(columns={"ProbabilityRaw": f"{model_type}_prob"})
+                df = df.drop(columns=["Probability"], errors="ignore")
+            else:
+                df = df.rename(columns={"Probability": f"{model_type}_prob"})
+                df[f"{model_type}_prob"] = df[f"{model_type}_prob"] / 100.0
             if merged is None:
                 merged = df
             else:
-                merged = merged.merge(df[["STT", "MaCP", "Year", f"{model_type}_prob"]], on=["STT", "MaCP", "Year"], how="inner")
+                merged = merged.merge(
+                    df[["MaCP", "Year", TARGET_COLUMN, f"{model_type}_prob"]],
+                    on=["MaCP", "Year", TARGET_COLUMN],
+                    how="inner",
+                )
         if merged is None or merged.empty:
             raise ValueError("Không thể tạo ma trận OOF cho ensemble.")
         feature_cols = [f"{m}_prob" for m in self.base_models if f"{m}_prob" in merged.columns]
@@ -54,18 +78,74 @@ class EnsembleStackingClassifier:
 
     def fit(self) -> Dict[str, float]:
         X_meta, y, meta_df = self._load_oof_matrix()
-        class_counts = np.bincount(y.astype(int), minlength=2)
-        if len(y) < 6 or class_counts.min() < 3:
-            self.meta_model = LogisticRegression(max_iter=3000, class_weight="balanced", random_state=RANDOM_STATE)
+        temporal_parts: List[pd.DataFrame] = []
+        year_metrics: List[Dict[str, float]] = []
+        for year in sorted(meta_df["Year"].unique()):
+            train_mask = meta_df["Year"] < year
+            test_mask = meta_df["Year"] == year
+            if not train_mask.any() or y.loc[train_mask].nunique() < 2:
+                continue
+            fold_model = self._new_meta_model(y.loc[train_mask])
+            fold_model.fit(X_meta.loc[train_mask], y.loc[train_mask])
+            fold_prob = fold_model.predict_proba(X_meta.loc[test_mask])[:, 1]
+
+            if temporal_parts:
+                history = pd.concat(temporal_parts, ignore_index=True)
+                threshold = find_optimal_threshold(history[TARGET_COLUMN], history["ProbabilityRaw"])
+            else:
+                threshold = 0.5
+            fold_pred = (fold_prob >= threshold).astype(int)
+            fold_out = meta_df.loc[test_mask, ["STT", "MaCP", "Year", TARGET_COLUMN]].copy()
+            fold_out["Prediction"] = fold_pred
+            fold_out["Probability"] = (fold_prob * 100).round(2)
+            fold_out["ProbabilityRaw"] = fold_prob
+            fold_out["Threshold"] = threshold
+            temporal_parts.append(fold_out)
+            fold_metrics = evaluate_binary_classifier(
+                y.loc[test_mask], fold_prob, threshold=threshold, y_pred=fold_pred
+            )
+            year_metrics.append({"Year": int(year), **fold_metrics})
+
+        if not temporal_parts:
+            raise ValueError("Không đủ lịch sử hai lớp để đánh giá temporal ensemble.")
+        out = pd.concat(temporal_parts, ignore_index=True)
+        metrics = evaluate_binary_classifier(
+            out[TARGET_COLUMN],
+            out["ProbabilityRaw"],
+            threshold=float(out["Threshold"].mean()),
+            y_pred=out["Prediction"],
+            include_ci=True,
+        )
+        metrics["EvaluationStartYear"] = int(out["Year"].min())
+
+        self.meta_model = self._new_meta_model(y)
         self.meta_model.fit(X_meta, y)
-        y_prob = self.meta_model.predict_proba(X_meta)[:, 1]
-        metrics = evaluate_binary_classifier(y, y_prob)
-        out = meta_df[["STT", "MaCP", "Year", TARGET_COLUMN]].copy()
-        out["Prediction"] = (y_prob >= 0.5).astype(int)
-        out["Probability"] = (y_prob * 100).round(2)
+        deployment_threshold = find_optimal_threshold(out[TARGET_COLUMN], out["ProbabilityRaw"])
+        metrics["DeploymentThreshold"] = deployment_threshold
         out.to_csv(self.output_dir / "predictions_with_probability.csv", index=False)
+        pd.DataFrame(year_metrics).to_csv(self.output_dir / "metrics_by_year.csv", index=False)
         save_json(self.output_dir / "metrics_test.json", metrics)
-        save_json(self.model_dir / "feature_schema.json", {"features": list(X_meta.columns), "base_models": self.base_models})
+        save_json(
+            self.model_dir / "feature_schema.json",
+            {
+                "features": list(X_meta.columns),
+                "base_models": self.base_models,
+                "decision_threshold": deployment_threshold,
+            },
+        )
+        save_json(
+            self.output_dir / "run_manifest.json",
+            build_run_manifest(
+                "ensemble",
+                {"meta_model": "calibrated_logistic_regression"},
+                load_training_frame(),
+                {
+                    "base_models": self.base_models,
+                    "evaluation": "temporal expanding-window meta OOF",
+                    "decision_threshold": deployment_threshold,
+                },
+            ),
+        )
         joblib.dump(self.meta_model, self.model_dir / "pd_ensemble_model.pkl")
         return metrics
 
@@ -90,11 +170,15 @@ class EnsembleStackingClassifier:
             self.fit()
         meta = joblib.load(meta_path)
         ensemble_prob = float(meta.predict_proba(pd.DataFrame([meta_inputs], columns=[f"{m}_prob" for m in self.base_models]))[:, 1][0])
+        schema = load_json(self.model_dir / "feature_schema.json", {})
+        threshold = float(schema.get("decision_threshold", 0.5))
         return {
             "individual": individual,
             "ensemble": {
                 "probability": round(ensemble_prob * 100, 2),
                 "base_models": self.base_models,
                 "confidence": round(abs(ensemble_prob - 0.5) * 2, 4),
+                "decision_threshold": round(threshold, 6),
+                "risk_level": "HIGH RISK" if ensemble_prob >= threshold else "LOW RISK",
             },
         }
